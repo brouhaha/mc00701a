@@ -2488,7 +2488,7 @@ hpil_sm_lp_goto_lpis:
 	call	X0ed8
 
 hpil_sm_lp_lpis:
-	call	X0eb4
+	call	hpil_check_mla
 	jz	X09b5
 	mov	r0,#hpil_sm_aa_state
 	mov	a,@r0
@@ -2508,7 +2508,7 @@ hpil_sm_lp_lpas:
 	jnz	X09cb
 	call	X0d4a
 	jnz	X09cb
-	call	X0eb4
+	call	hpil_check_mla
 	jz	hpil_sm_lp_goto_lpis
 X09cb:	ret
 
@@ -2700,7 +2700,7 @@ hpil_sm_tp_goto_tpis:
 	call	X0ecf
 
 hpil_sm_tp_tpis:
-	call	X0d7c
+	call	hpil_check_mta1
 	jz	X0ab3
 	mov	r0,#hpil_sm_aa_state
 	mov	a,@r0
@@ -2715,7 +2715,7 @@ hpil_sm_tp_goto_tpas:
 hpil_sm_tp_tpas:
 	call	hpil_check_msg_non_data
 	jz	X0ac9
-	call	X0d7c
+	call	hpil_check_mta1
 	jnz	X0ac9
 	call	X0d4a
 	jnz	X0ac9
@@ -2785,7 +2785,7 @@ hpil_sm_l_goto_lids:
 hpil_sm_l_lids:
 	call	hpil_check_msg_non_data
 	jz	X0b25
-	call	X0eb4
+	call	hpil_check_mla
 	jz	X0b1a
 	mov	r0,#hpil_sm_aa_state
 	mov	a,@r0
@@ -2812,7 +2812,7 @@ hpil_sm_l_lacs:
 	mov	a,r2
 	xrl	a,#hpil_cmd_ifc
 	jz	hpil_sm_l_goto_lids
-	call	X0d7c
+	call	hpil_check_mta1
 	jz	X0b43
 	mov	r0,#hpil_sm_aa_state
 	mov	a,@r0
@@ -2990,7 +2990,7 @@ hpil_sm_t_goto_tids:
 	mov	@r1,#hpil_sm_t_state_tids
 
 hpil_sm_t_tids:
-	call	X0d7c
+	call	hpil_check_mta1
 	jz	X0c20
 	mov	r0,#25h
 	mov	a,@r0
@@ -3028,7 +3028,7 @@ X0c43:	call	X0e51
 	mov	a,r2
 	xrl	a,#hpil_cmd_unt
 	jz	hpil_sm_t_goto_tids
-	call	X0d99
+	call	hpil_check_mta2
 	jnz	hpil_sm_t_goto_tids
 	call	X0d5a
 	jz	X0c5f
@@ -3036,7 +3036,7 @@ X0c43:	call	X0e51
 	mov	a,@r0
 	anl	a,#2
 	jnz	hpil_sm_t_goto_tids
-X0c5f:	call	X0eb4
+X0c5f:	call	hpil_check_mla
 	jz	X0c6a
 	mov	r0,#25h
 	mov	a,@r0
@@ -3271,7 +3271,10 @@ X0d7a:	clr	a
 	ret
 
 
-X0d7c:	call	X0e83
+; Check for MTA (My Talk Address) in a comamnd frame
+; unclear why there are two copies of this
+hpil_check_mta1:
+	call	X0e83
 	jz	X0d97
 	mov	a,r2
 	anl	a,#0e0h
@@ -3294,7 +3297,10 @@ X0d97:	clr	a
 	ret
 
 
-X0d99:	call	X0e83
+; Check for MTA (My Talk Address) in a comamnd frame
+; unclear why there are two copies of this
+hpil_check_mta2:
+	call	X0e83
 	jz	X0db4
 	mov	a,r2
 	anl	a,#0e0h
@@ -3317,9 +3323,8 @@ X0db4:	clr	a
 	ret
 
 
-; this might be checking for SAD (secondary address) in a CMD frame,
-; or an SOT (start of transmission, SDA, SST, SDI, SAI, TCT) message
-; in a RDY frame.
+; this might be checking for an SOT (start of transmission,
+; SDA, SST, SDI, SAI, TCT) message in a RDY frame.
 X0db6:	call	hpil_check_msg_non_data_and_frav
 	jz	X0dc4
 	mov	a,r2
@@ -3535,7 +3540,9 @@ hpil_check_msg_non_data:
 	ret
 
 
-X0eb4:	call	X0e83
+; Check for MLA (My Listen Address) in a comamnd frame
+hpil_check_mla:
+	call	X0e83
 	jz	ret_a_zero
 	mov	a,r2
 	anl	a,#0e0h
