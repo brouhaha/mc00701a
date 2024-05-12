@@ -124,13 +124,13 @@ hpil_sm_21_state_02	equ	02h
 hpil_sm_21_state_04	equ	04h
 hpil_sm_21_state_08	equ	08h
 
-hpil_sm_d_state	equ	22h
+hpil_sm_d_state	equ	22h			; Driver
 hpil_sm_d_state_dids	equ	01h
 hpil_sm_d_state_02	equ	02h
 hpil_sm_d_state_04	equ	04h
 hpil_sm_d_state_08	equ	08h
 
-hpil_sm_dc_state	equ	23h
+hpil_sm_dc_state	equ	23h		; Device Clear
 hpil_sm_dc_state_dcis	equ	01h
 hpil_sm_dc_state_dcas	equ	02h
 
@@ -2234,7 +2234,7 @@ hpil_sm_20_goto_goto_04:
 	mov	r6,a
 
 hpil_sm_20_04:
-	call	X0dc6
+	call	hpil_check_ifcr
 	jnz	X0829
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
@@ -2353,7 +2353,7 @@ hpil_sm_21_02:
 	jz	X0929
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
-	anl	a,#4
+	anl	a,#hpil_sm_d_state_04
 	jz	hpil_sm_21_goto_04
 X0929:	ret
 
@@ -2363,7 +2363,7 @@ hpil_sm_21_goto_04:
 hpil_sm_21_04:
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
-	anl	a,#4
+	anl	a,#hpil_sm_d_state_04
 	jnz	hpil_sm_21_goto_08
 	ret
 
@@ -3023,7 +3023,7 @@ hpil_sm_t_tads:
 
 X0c43:	call	X0e51
 	jz	X0c75
-	call	X0dc6
+	call	hpil_check_ifcr
 	jnz	hpil_sm_t_goto_tids
 	mov	a,r2
 	xrl	a,#hpil_cmd_unt
@@ -3077,7 +3077,7 @@ hpil_sm_t_goto_ters:
 hpil_sm_t_ters:
 	call	hpil_check_msg_non_data
 	jz	X0c8f
-	call	X0dc6
+	call	hpil_check_ifcr
 	jnz	hpil_sm_t_goto_tids
 X0c8f:	mov	r0,#21h
 	mov	a,@r0
@@ -3101,7 +3101,7 @@ hpil_sm_t_goto_tahs:
 hpil_sm_t_tahs:
 	call	hpil_check_msg_non_data
 	jz	X0caf
-	call	X0dc6
+	call	hpil_check_ifcr
 	jnz	hpil_sm_t_goto_tids
 X0caf:	mov	r0,#21h
 	mov	a,@r0
@@ -3204,7 +3204,7 @@ hpil_sm_dc_dcas:
 hpil_sm_t_spas_dias_aias:
 	call	hpil_check_msg_non_data
 	jz	X0d30
-	call	X0dc6
+	call	hpil_check_ifcr
 	jz	X0d30
 	assume	mb:1
 	jmp	hpil_sm_t_goto_tids
@@ -3316,6 +3316,10 @@ X0d99:	call	X0e83
 X0db4:	clr	a
 	ret
 
+
+; this might be checking for SAD (secondary address) in a CMD frame,
+; or an SOT (start of transmission, SDA, SST, SDI, SAI, TCT) message
+; in a RDY frame.
 X0db6:	call	hpil_check_msg_non_data_and_frav
 	jz	X0dc4
 	mov	a,r2
@@ -3328,7 +3332,9 @@ X0db6:	call	hpil_check_msg_non_data_and_frav
 X0dc4:	clr	a
 	ret
 
-X0dc6:	mov	a,r7
+
+hpil_check_ifcr:
+	mov	a,r7
 	anl	a,#10h
 	jz	X0dce
 	mov	a,#1
@@ -3758,7 +3764,7 @@ hpil_clear:
 X0fca:	ret
 
 
-X0fcb:	mov	r0,#2ah
+X0fcb:	mov	r0,#hpil_sm_2a_state
 	mov	a,@r0
 	anl	a,#4
 	jz	X0fd5
