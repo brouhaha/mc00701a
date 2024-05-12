@@ -323,9 +323,9 @@ main_loop:
 	sel	mb1
 	assume	mb:1
 	call	hpil_read_intr_reg
-	call	hpil_sm_20	; Receiver
-	call	hpil_sm_21	; Driver
-	call	hpil_sm_d	; Source Handshake
+	call	hpil_sm_20	; state machine 20h
+	call	hpil_sm_21	; state machine 21h
+	call	hpil_sm_d	; Driver
 	call	hpil_sm_dc	; Device Clear
 				; no state machine 24h
 	call	hpil_sm_aa	; Auto Address
@@ -340,8 +340,8 @@ main_loop:
 	call	hpil_send_data_if_frav
 	sel	mb1
 	assume	mb:1
-	call	X0f00		; state machine 0ah
-	call	X0f44		; state machine 0bh
+	call	X0f00		; state machine 2ah
+	call	X0f44		; state machine 2bh
 	sel	mb0
 	assume	mb:0
 	call	hpil_receive_data_if_frav
