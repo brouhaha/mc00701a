@@ -13,6 +13,9 @@
 
 	cpu	8048
 
+accessory_id	equ	032h
+status_byte_1	equ	080h
+
 ; The CRTC is a 6545A, though it appears that the special feaures of the
 ; 6545 (compared to similar CRTC chips) are not being used, so an MC68A45
 ; or HD46505 might work.
@@ -77,13 +80,16 @@
 ;
 ; 020h..02dh: state machine state variables, all initialized to 0x01 (one-hot encoding)
 ;
+; 02eh
 ; 02fh
 ; 030h
 ; 031h
 ; 032h
 ; 033h
-;
-; 036h
+
+rx_wr_ptr	equ	034h
+
+tx_wr_ptr	equ	036h
 ; 037h
 ;
 ; 039h
@@ -103,6 +109,12 @@
 ; 047h
 ; 048h
 ; 049h
+
+rx_buf		equ	050h
+rx_buf_end	equ	05fh
+
+tx_buf		equ	060h
+tx_buf_end	equ	06fh
 
 ; Each HP-IL interface state machine has a one-byte state variable, which uses
 ; a one-hot encoding (i.e., a separate bit for each state, never having two
@@ -317,7 +329,7 @@ X0005:	sel	rb1
 	sel	mb1
 	assume	mb:1
 	call	hpil_reset_chip
-	call	init_ram20
+	call	hpil_sm_init
 	call	hpil_set_unaddressed
 	sel	mb0
 	assume	mb:0
@@ -341,14 +353,14 @@ main_loop:
 	call	hpil_clear	; handle DCL, SDC (based on DC state machine)
 	sel	mb0
 	assume	mb:0
-	call	hpil_send_data_if_frav
+	call	enqueue_tx_data	; if there's data to be sent, put it in the tx queue
 	sel	mb1
 	assume	mb:1
 	call	X0f00		; state machine 2ah
 	call	X0f44		; state machine 2bh
 	sel	mb0
 	assume	mb:0
-	call	hpil_receive_data_if_frav
+	call	enqueue_rx_data
 	sel	mb1
 	assume	mb:1
 	call	X0fac
@@ -409,7 +421,7 @@ X0068:	mov	a,r1
 	ret
 
 
-hpil_send_data_if_frav:
+enqueue_tx_data:
 	sel	mb1				; FRAV?
 	assume	mb:1
 	call	hpil_check_msg_non_data_and_frav
@@ -425,33 +437,37 @@ hpil_send_data_if_frav:
 	mov	a,r2
 	xrl	a,#hpil_rdy_sst
 	jnz	X0091
-	call	X0235
-	mov	a,#80h
-	call	X0200
-	sel	rb0
-	mov	a,r5
+
+	call	init_tx_queue		; first SST byte is always 0x80
+	mov	a,#status_byte_1
+	call	enqueue_tx_byte
+
+	sel	rb0			; Mask the MSB off the status; only the
+	mov	a,r5			; low 7 bits are sent to the controller
 	sel	rb1
 	anl	a,#7fh
-	call	X0200
+	call	enqueue_tx_byte
 	ret
 
 X0091:	mov	a,r2
 	xrl	a,#hpil_rdy_sai
 	jnz	X009d
-	call	X0235
-	mov	a,#32h
-	call	X0200
+
+	call	init_tx_queue
+	mov	a,#accessory_id
+	call	enqueue_tx_byte
 	ret
 
 X009d:	mov	a,r2
 	xrl	a,#hpil_rdy_sdi
 	jnz	X00af
-	call	X0235
-	mov	r5,#0ah
-	mov	r1,#0
+
+	call	init_tx_queue
+	mov	r5,#device_id_len
+	mov	r1,#device_id_str & 0ffh
 X00a8:	mov	a,r1
 	movp3	a,@a
-	call	X0200
+	call	enqueue_tx_byte
 	inc	r1
 	djnz	r5,X00a8
 X00af:	ret
@@ -538,7 +554,7 @@ X00fd:	jmp	X025a
 
 	org	100h
 
-hpil_receive_data_if_frav:
+enqueue_rx_data:
 	sel	mb1		; frame available?
 	assume	mb:1
 	call	hpil_check_msg_non_data_and_frns
@@ -546,19 +562,19 @@ hpil_receive_data_if_frav:
 	assume	mb:0
 	jz	X0132
 
-	mov	r0,#hpil_sm_l_state
+	mov	r0,#hpil_sm_l_state	; are we listening?
 	mov	a,@r0
 	anl	a,#hpil_sm_l_state_lacs
-	jz	X0132
+	jz	X0132			;   no
 
 X010d:	sel	rb0		; are we in an escape sequence?
 	mov	a,r4
 	sel	rb1
-	jb0	X016e
+	jb0	X016e		;  yes
 
 	mov	a,r2
 	add	a,#0e0h		; is it a control character (000h through 01fh)?
-	jnc	control_char
+	jnc	control_char	;   yes
 
 	sel	rb0		; replace or insert mode?
 	mov	a,r5
@@ -568,10 +584,10 @@ X010d:	sel	rb0		; are we in an escape sequence?
 	jmp	X0536		; insert mode
 
 
-; replace character
+; enqueue received character
 X011f:	mov	a,r2
 	jz	X0132
-	mov	r0,#34h
+	mov	r0,#rx_wr_ptr
 
 	dis	i
 	mov	a,@r0
@@ -582,9 +598,9 @@ X011f:	mov	a,r2
 	mov	a,@r0
 	en	i
 
-	xrl	a,#5fh
+	xrl	a,#rx_buf_end
 	jnz	X0132
-	clr	f1
+	clr	f1		; set rx buf full
 	cpl	f1
 X0132:	ret
 
@@ -786,10 +802,11 @@ write_crtc_control_reg:
 
 	org	200h
 
-X0200:	mov	r4,a
-	mov	r0,#36h
+enqueue_tx_byte:
+	mov	r4,a
+	mov	r0,#tx_wr_ptr
 	mov	a,@r0
-	xrl	a,#6fh
+	xrl	a,#tx_buf_end
 	jz	X020d
 	mov	a,@r0
 	inc	@r0
@@ -799,7 +816,7 @@ X0200:	mov	r4,a
 X020d:	ret
 
 
-X020e:	mov	r0,#36h
+X020e:	mov	r0,#tx_wr_ptr
 
 	dis	i
 	mov	a,@r0
@@ -830,17 +847,18 @@ X0226:	call	X022b
 	ret
 
 
-X022b:	mov	r0,#34h
+X022b:	mov	r0,#rx_wr_ptr
 	jmp	X0231
 
-X022f:	mov	r0,#36h
+X022f:	mov	r0,#tx_wr_ptr
 X0231:	mov	a,@r0
 	inc	r0
 	xrl	a,@r0
 	ret
 
 
-X0235:	mov	r0,#36h
+init_tx_queue:
+	mov	r0,#tx_wr_ptr
 	mov	@r0,#60h
 	inc	r0
 	mov	@r0,#60h
@@ -1019,7 +1037,9 @@ X02fa:	jmp	X025a
 
 	org	300h
 
+device_id_str:
 	db	"MC00701A", char_cr, char_lf
+device_id_len	equ	$-device_id_str
 
 ; copied to registers 02eh..03dh
 X030a:	db	0
@@ -3371,9 +3391,8 @@ hpil_reset_chip:
 	ret
 
 
-; initializes 14 bytes of RAM starting at 20h to 01h
-; possibly state machine state variables?
-init_ram20:
+; initializes 14 HP-IL state machine states (RAM from 020h to 02dh) to 01h
+hpil_sm_init:
 	mov	r0,#14
 	mov	r1,#20h
 	mov	a,#01h
