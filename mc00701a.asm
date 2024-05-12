@@ -104,9 +104,13 @@
 ; 048h
 ; 049h
 
-; For HP-IL chip (1LB3), use state machine specification in HP-IL
-; Integrated Circuit User's Manual, figure 3-2, rather than that of
-; HP-IL Interface Specification, figure 2-3.
+; Each HP-IL interface state machine has a one-byte state variable, which uses
+; a one-hot encoding (i.e., a separate bit for each state, never having two
+; bits set simultaneously).
+
+; For HP-IL chip (1LB3), use the R, D, AH, and SH state machines specified in
+; the HP-IL Integrated Circuit User's Manual, figure 3-2 through 3-5, rather
+; than those of HP-IL Interface Specification, figure 2-3 through 2-6.
 
 hpil_sm_20_state	equ	20h
 hpil_sm_20_state_01	equ	01h
