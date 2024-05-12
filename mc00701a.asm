@@ -124,13 +124,13 @@ tx_buf_end	equ	06fh
 ; the HP-IL Integrated Circuit User's Manual, figure 3-2 through 3-5, rather
 ; than those of HP-IL Interface Specification, figure 2-3 through 2-6.
 
-hpil_sm_r_state	equ	20h
+hpil_sm_r_state	equ	20h			; Receiver
 hpil_sm_r_state_reis	equ	01h
 hpil_sm_r_state_rsys	equ	02h
-hpil_sm_r_state_04	equ	04h
+hpil_sm_r_state_rcds	equ	04h
 hpil_sm_r_state_rits	equ	08h
 
-hpil_sm_ah_state	equ	21h
+hpil_sm_ah_state	equ	21h		; Acceptor Handshake
 hpil_sm_ah_state_aids	equ	01h
 hpil_sm_ah_state_02	equ	02h
 hpil_sm_ah_state_acrs	equ	04h
@@ -178,8 +178,10 @@ hpil_sm_t_state_aias	equ	20h
 hpil_sm_t_state_ters	equ	40h
 hpil_sm_t_state_tahs	equ	80h
 
-; 2ah has three states
 hpil_sm_2a_state	equ	02ah
+hpil_sm_2a_state_01	equ	01h
+hpil_sm_2a_state_02	equ	02h
+hpil_sm_2a_state_04	equ	04h
 
 ; 2bh has four states
 hpil_sm_2b_state	equ	02bh
@@ -339,8 +341,8 @@ main_loop:
 	sel	mb1
 	assume	mb:1
 	call	hpil_read_intr_reg
-	call	hpil_sm_r	; state machine 20h
-	call	hpil_sm_ah	; state machine 21h
+	call	hpil_sm_r	; Receiver
+	call	hpil_sm_ah	; Acceptor Handshake
 	call	hpil_sm_d	; Driver
 	call	hpil_sm_dc	; Device Clear
 				; no state machine 24h
@@ -356,8 +358,8 @@ main_loop:
 	call	enqueue_tx_data	; if there's data to be sent, put it in the tx queue
 	sel	mb1
 	assume	mb:1
-	call	X0f00		; state machine 2ah
-	call	X0f44		; state machine 2bh
+	call	hpil_sm_2a	; state machine 2ah
+	call	hpil_sm_2b	; state machine 2bh
 	sel	mb0
 	assume	mb:0
 	call	enqueue_rx_data
@@ -2160,8 +2162,8 @@ hpil_sm_r:
 	mov	a,@r1
 	jb0	hpil_sm_r_reis
 	jb1	hpil_sm_r_rsys
-	jb2	hpil_sm_r_04
-	jb3	hpil_sm_r_08
+	jb2	hpil_sm_r_rcds
+	jb3	hpil_sm_r_rits
 ; if invalid state, falls into hpil_sm_r_goto_reis
 
 hpil_sm_r_goto_reis:
@@ -2210,7 +2212,7 @@ hpil_sm_r_rsys:
 	jnz	X0885		;   no, return
 
 	call	X0ee1
-	jnz	hpil_sm_r_goto_goto_04
+	jnz	hpil_sm_r_goto_rcds
 
 	call	hpil_check_msg_non_data_and_frns
 	jz	X0858
@@ -2218,13 +2220,13 @@ hpil_sm_r_rsys:
 	mov	r0,#hpil_sm_l_state
 	mov	a,@r0
 	anl	a,#hpil_sm_l_state_lacs
-	jnz	hpil_sm_r_goto_goto_04
+	jnz	hpil_sm_r_goto_rcds
 
 X0858:	call	hpil_check_msg_non_data_and_frav
 	jz	X0860
 
 	call	hpil_check_sot
-	jz	hpil_sm_r_goto_goto_04
+	jz	hpil_sm_r_goto_rcds
 
 X0860:	call	hpil_check_sot
 	jz	X086b
@@ -2232,7 +2234,7 @@ X0860:	call	hpil_check_sot
 	mov	r0,#hpil_sm_t_state	; is T in any state other than TIDS?
 	mov	a,@r0
 	anl	a,#0feh
-	jz	hpil_sm_r_goto_goto_04
+	jz	hpil_sm_r_goto_rcds
 
 X086b:	call	X0e51
 	jnz	hpil_sm_r_goto_reis
@@ -2254,13 +2256,13 @@ X087a:	call	hpil_check_sot
 
 X0885:	ret
 
-hpil_sm_r_goto_goto_04:
-	mov	@r1,#hpil_sm_r_state_04
+hpil_sm_r_goto_rcds:
+	mov	@r1,#hpil_sm_r_state_rcds
 	mov	a,r6
 	anl	a,#7fh
 	mov	r6,a
 
-hpil_sm_r_04:
+hpil_sm_r_rcds:
 	call	hpil_check_ifcr
 	jnz	X0829
 	mov	r0,#hpil_sm_d_state
@@ -2272,14 +2274,14 @@ hpil_sm_r_04:
 	mov	a,r5
 	sel	rb1
 	anl	a,#80h
-	jnz	hpil_sm_r_goto_08	; yes
+	jnz	hpil_sm_r_goto_rits	; yes
 
 X089e:	ret
 
-hpil_sm_r_goto_08:
+hpil_sm_r_goto_rits:
 	mov	@r1,#hpil_sm_r_state_rits
 
-hpil_sm_r_08:
+hpil_sm_r_rits:
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
 	anl	a,#hpil_sm_d_state_dtrs
@@ -3637,56 +3639,66 @@ X0efc:	inc	a
 
 ; state machine 2a
 
-X0f00:	mov	r1,#2ah
+hpil_sm_2a:
+	mov	r1,#hpil_sm_2a_state
 	mov	a,@r1
-	jb0	X0f0b
-	jb1	X0f15
-	jb2	X0f35
-X0f09:	mov	@r1,#1
+	jb0	hpil_sm_2a_01
+	jb1	hpil_sm_2a_02
+	jb2	hpil_sm_2a_04
 
-X0f0b:	mov	r0,#hpil_sm_t_state
+hpil_sm_2a_goto_01:
+	mov	@r1,#hpil_sm_2a_state_01
+
+hpil_sm_2a_01:
+	mov	r0,#hpil_sm_t_state
 	mov	a,@r0
 	anl	a,#0fch
-	jnz	X0f13
+	jnz	hpil_sm_2a_goto_02
 
 	ret
 
-X0f13:	mov	@r1,#2
-X0f15:	mov	r0,#hpil_sm_t_state
+hpil_sm_2a_goto_02:
+	mov	@r1,#hpil_sm_2a_state_02
+
+hpil_sm_2a_02:
+	mov	r0,#hpil_sm_t_state
 	mov	a,@r0
 	anl	a,#hpil_sm_t_state_tids | hpil_sm_t_state_tads
-	jnz	X0f09
+	jnz	hpil_sm_2a_goto_01
 	call	hpil_check_msg_non_data
 	jz	X0f32
 	mov	a,r7
 	anl	a,#2
 	jz	X0f32
 	call	hpil_check_msg_non_data_and_frns
-	jz	X0f33
+	jz	hpil_sm_2a_goto_04
 	mov	r0,#37h
 	mov	a,@r0
 	dec	a
 	mov	r0,a
 	mov	a,@r0
 	xrl	a,r2
-	jnz	X0f33
+	jnz	hpil_sm_2a_goto_04
 X0f32:	ret
 
-X0f33:	mov	@r1,#4
+hpil_sm_2a_goto_04:
+	mov	@r1,#hpil_sm_2a_state_04
 
-X0f35:	mov	r0,#hpil_sm_t_state
+hpil_sm_2a_04:
+	mov	r0,#hpil_sm_t_state
 	mov	a,@r0
 	anl	a,#40h
-	jnz	X0f13
+	jnz	hpil_sm_2a_goto_02
 
 	mov	r0,#hpil_sm_t_state
 	mov	a,@r0
 	anl	a,#hpil_sm_t_state_tids | hpil_sm_t_state_tads
-	jnz	X0f09
+	jnz	hpil_sm_2a_goto_01
 	ret
 
 
-X0f44:	mov	r1,#hpil_sm_2b_state
+hpil_sm_2b:
+	mov	r1,#hpil_sm_2b_state
 	mov	a,@r1
 	jb0	hpil_sm_2b_01
 	jb1	hpil_sm_2b_02
@@ -3694,7 +3706,7 @@ X0f44:	mov	r1,#hpil_sm_2b_state
 	jb3	hpil_sm_2b_08
 
 hpil_sm_2b_goto_01:
-	mov	@r1,#1
+	mov	@r1,#hpil_sm_2b_state_01
 
 hpil_sm_2b_01:
 	mov	r0,#hpil_sm_2a_state
