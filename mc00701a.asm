@@ -59,7 +59,7 @@ status_byte_1	equ	080h
 ;                 bit 4: cursor mode,        0 = replace,           1 = insert
 ;                 bit 5: RAM U10 self-test:  0 = untested or good,  1 = bad
 ;                 bit 6: RAM U11 self-test:  0 = untested or good,  1 = bad
-;                 bit 7: ???, not reported to host
+;                 bit 7: rx buffer avail, not reported to host
 ;       r6 (006h) HP-IL device address (31 if no address)
 ;       r7 (007h) HP-IL interrupt register save
 ;
@@ -124,11 +124,11 @@ tx_buf_end	equ	06fh
 ; the HP-IL Integrated Circuit User's Manual, figure 3-2 through 3-5, rather
 ; than those of HP-IL Interface Specification, figure 2-3 through 2-6.
 
-hpil_sm_20_state	equ	20h
-hpil_sm_20_state_01	equ	01h
-hpil_sm_20_state_02	equ	02h
-hpil_sm_20_state_04	equ	04h
-hpil_sm_20_state_08	equ	08h
+hpil_sm_r_state	equ	20h
+hpil_sm_r_state_reis	equ	01h
+hpil_sm_r_state_rsys	equ	02h
+hpil_sm_r_state_04	equ	04h
+hpil_sm_r_state_08	equ	08h
 
 hpil_sm_21_state	equ	21h
 hpil_sm_21_state_01	equ	01h
@@ -339,7 +339,7 @@ main_loop:
 	sel	mb1
 	assume	mb:1
 	call	hpil_read_intr_reg
-	call	hpil_sm_20	; state machine 20h
+	call	hpil_sm_r	; state machine 20h
 	call	hpil_sm_21	; state machine 21h
 	call	hpil_sm_d	; Driver
 	call	hpil_sm_dc	; Device Clear
@@ -816,26 +816,28 @@ enqueue_tx_byte:
 X020d:	ret
 
 
-X020e:	mov	r0,#tx_wr_ptr
+read_tx_buf:	mov	r0,#tx_wr_ptr
 
 	dis	i
-	mov	a,@r0
+	mov	a,@r0		; is tx_wr_ptr equal to tx_rd_ptr?
 	inc	r0
 	xrl	a,@r0
-	jz	X021e
+	jz	reset_tx_buf	;   yes
 	en	i
 
-	mov	a,@r0
+	mov	a,@r0		; a = tx_rd_ptr++
 	inc	@r0
-	mov	r0,a
+
+	mov	r0,a		; get byte from tx_rd_ptr
 	mov	a,@r0
 	mov	r4,a
 	clr	a
 	ret
 
-X021e:	mov	@r0,#60h
+reset_tx_buf:
+	mov	@r0,#tx_buf
 	dec	r0
-	mov	@r0,#60h
+	mov	@r0,#tx_buf
 	en	i
 
 	mov	a,r0
@@ -2153,27 +2155,27 @@ hpil_set_unaddressed:
 ; Integrated Circuit User's Manual, figure 3-2, rather than that of
 ; HP-IL Interface Specification, figure 2-3.
 
-hpil_sm_20:
-	mov	r1,#hpil_sm_20_state
+hpil_sm_r:
+	mov	r1,#hpil_sm_r_state
 	mov	a,@r1
-	jb0	hpil_sm_20_01
-	jb1	hpil_sm_20_02
-	jb2	hpil_sm_20_04
-	jb3	hpil_sm_20_08
-; if invalid state, falls into hpil_sm_20_goto_01
+	jb0	hpil_sm_r_reis
+	jb1	hpil_sm_r_rsys
+	jb2	hpil_sm_r_04
+	jb3	hpil_sm_r_08
+; if invalid state, falls into hpil_sm_r_goto_reis
 
-hpil_sm_20_goto_01:
+hpil_sm_r_goto_reis:
 	mov	a,r6
 	anl	a,#7fh
 	mov	r6,a
-	mov	@r1,#hpil_sm_20_state_01
+	mov	@r1,#hpil_sm_r_state_reis
 	
-hpil_sm_20_01:
-	sel	rb0
+hpil_sm_r_reis:
+	sel	rb0		; space available in receive buffer?
 	mov	a,r5
 	sel	rb1
 	anl	a,#80h
-	jz	X0828
+	jz	X0828		;   no, return
 
 	mov	a,r7		; check saved state of HP-IL interrupt register
 	anl	a,#16h		; any of IFCR, FRAV, FRNS set?
@@ -2185,96 +2187,98 @@ X0829:	mov	a,r7
 	anl	a,#10h		; IFCR?
 	jz	X0839		;   no
 
-	mov	r2,#90h
+	mov	r2,#hpil_cmd_ifc	; ignore HP-IL data reg, hardwire IFC command
 	mov	a,r3
 	anl	a,#1fh
 	orl	a,#80h
 	mov	r3,a
-	jmp	hpil_sm_20_goto_02
+	jmp	hpil_sm_r_goto_rsys
 
 X0839:	mov	r0,#2		; read HP-IL data reg into r2
 	call	hpil_read_reg
 	mov	r2,a
 
-hpil_sm_20_goto_02:
-	mov	@r1,#hpil_sm_20_state_02
+hpil_sm_r_goto_rsys:
+	mov	@r1,#hpil_sm_r_state_rsys
 	call	X0e33
 
-hpil_sm_20_02:
-	sel	rb0
+hpil_sm_r_rsys:
+	sel	rb0		; space avaialble in receive buffer?
 	mov	a,r5
 	sel	rb1
 	anl	a,#80h
-	jnz	X0885
+	jnz	X0885		;   no, return
 
 	call	X0ee1
-	jnz	hpil_sm_20_goto_goto_04
+	jnz	hpil_sm_r_goto_goto_04
 	call	hpil_check_msg_non_data_and_frns
 	jz	X0858
 	mov	r0,#27h
 	mov	a,@r0
 	anl	a,#2
-	jnz	hpil_sm_20_goto_goto_04
+	jnz	hpil_sm_r_goto_goto_04
 X0858:	call	hpil_check_msg_non_data_and_frav
 	jz	X0860
-	call	X0db6
-	jz	hpil_sm_20_goto_goto_04
-X0860:	call	X0db6
+	call	hpil_check_sot
+	jz	hpil_sm_r_goto_goto_04
+X0860:	call	hpil_check_sot
 	jz	X086b
 
-	mov	r0,#hpil_sm_t_state
+	mov	r0,#hpil_sm_t_state	; is T in any state other than TIDS?
 	mov	a,@r0
 	anl	a,#0feh
-	jz	hpil_sm_20_goto_goto_04
+	jz	hpil_sm_r_goto_goto_04
 
 X086b:	call	X0e51
-	jnz	hpil_sm_20_goto_01
+	jnz	hpil_sm_r_goto_reis
 	call	hpil_check_msg_non_data_and_frns
 	jz	X087a
 
-	mov	r0,#hpil_sm_t_state
+	mov	r0,#hpil_sm_t_state	; is T in any state other than TIDS and TADSD?
 	mov	a,@r0
 	anl	a,#0fch
-	jnz	hpil_sm_20_goto_01
+	jnz	hpil_sm_r_goto_reis
 
-X087a:	call	X0db6
+X087a:	call	hpil_check_sot
 	jz	X0885
 
 	mov	r0,#hpil_sm_t_state
 	mov	a,@r0
 	anl	a,#0feh
-	jnz	hpil_sm_20_goto_01
+	jnz	hpil_sm_r_goto_reis
 
 X0885:	ret
 
-hpil_sm_20_goto_goto_04:
-	mov	@r1,#hpil_sm_20_state_04
+hpil_sm_r_goto_goto_04:
+	mov	@r1,#hpil_sm_r_state_04
 	mov	a,r6
 	anl	a,#7fh
 	mov	r6,a
 
-hpil_sm_20_04:
+hpil_sm_r_04:
 	call	hpil_check_ifcr
 	jnz	X0829
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
 	anl	a,#hpil_sm_d_state_02
 	jnz	X089e
-	sel	rb0
+
+	sel	rb0		; space available in receive buffer?
 	mov	a,r5
 	sel	rb1
 	anl	a,#80h
-	jnz	hpil_sm_20_goto_08
+	jnz	hpil_sm_r_goto_08	; yes
+
 X089e:	ret
 
-hpil_sm_20_goto_08:
-	mov	@r1,#hpil_sm_20_state_08
+hpil_sm_r_goto_08:
+	mov	@r1,#hpil_sm_r_state_08
 
-hpil_sm_20_08:
+hpil_sm_r_08:
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
 	anl	a,#hpil_sm_d_state_02
-	jnz	hpil_sm_20_goto_01
+	jnz	hpil_sm_r_goto_reis
 	ret
 
 
@@ -2403,9 +2407,9 @@ hpil_sm_21_08:
 	anl	a,#1
 	jz	X0956
 
-	mov	r0,#hpil_sm_20_state
+	mov	r0,#hpil_sm_r_state
 	mov	a,@r0
-	anl	a,#hpil_sm_20_state_01
+	anl	a,#hpil_sm_r_state_reis
 	jnz	hpil_sm_21_goto_02
 	call	hpil_check_msg_non_data
 	jz	X0956
@@ -2436,9 +2440,9 @@ hpil_sm_d_dids:
 	anl	a,#1				; ORAV? possible proxy for SDYS+SCHS?
 	jz	hpil_sm_d_goto_08
 
-	mov	r0,#hpil_sm_20_state		; test ACRS? RITS?
+	mov	r0,#hpil_sm_r_state		; test ACRS? RITS?
 	mov	a,@r0
-	anl	a,#hpil_sm_20_state_08
+	anl	a,#hpil_sm_r_state_08
 	jnz	hpil_sm_d_goto_02
 
 	mov	r0,#hpil_sm_21_state		; test ACRS? RITS?
@@ -3343,9 +3347,10 @@ X0db4:	clr	a
 	ret
 
 
-; this might be checking for an SOT (start of transmission,
+; check for an SOT (start of transmission,
 ; SDA, SST, SDI, SAI, TCT) message in a RDY frame.
-X0db6:	call	hpil_check_msg_non_data_and_frav
+hpil_check_sot:
+	call	hpil_check_msg_non_data_and_frav
 	jz	X0dc4
 	mov	a,r2
 	anl	a,#0f8h
@@ -3688,9 +3693,9 @@ hpil_sm_2b_01:
 	mov	a,@r0
 	anl	a,#hpil_sm_21_state_02
 	jz	X0f81
-	mov	r0,#hpil_sm_20_state
+	mov	r0,#hpil_sm_r_state
 	mov	a,@r0
-	anl	a,#hpil_sm_20_state_01
+	anl	a,#hpil_sm_r_state_reis
 	jz	X0f81
 	sel	mb0
 	assume	mb:0
@@ -3719,7 +3724,7 @@ X0f81:	ret
 hpil_sm_2b_goto_02:
 	sel	mb0
 	assume	mb:0
-	call	X020e
+	call	read_tx_buf
 	mov	a,r4
 	sel	mb1
 	assume	mb:1
@@ -3733,7 +3738,7 @@ hpil_sm_2b_02:
 
 hpil_sm_2b_goto_04:
 	sel	rb0
-	mov	r0,#40h
+	mov	r0,#hpil_rdy_eto
 	mov	r1,#0a0h
 	sel	rb1
 	mov	@r1,#hpil_sm_2b_state_04
@@ -3742,7 +3747,7 @@ hpil_sm_2b_04:
 
 hpil_sm_2b_goto_08:
 	sel	rb0
-	mov	r0,#41h
+	mov	r0,#hpil_rdy_ete
 	mov	r1,#0a0h
 	sel	rb1
 	mov	@r1,#hpil_sm_2b_state_08
