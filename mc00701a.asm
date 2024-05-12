@@ -128,19 +128,19 @@ hpil_sm_r_state	equ	20h
 hpil_sm_r_state_reis	equ	01h
 hpil_sm_r_state_rsys	equ	02h
 hpil_sm_r_state_04	equ	04h
-hpil_sm_r_state_08	equ	08h
+hpil_sm_r_state_rits	equ	08h
 
-hpil_sm_21_state	equ	21h
-hpil_sm_21_state_01	equ	01h
-hpil_sm_21_state_02	equ	02h
-hpil_sm_21_state_04	equ	04h
-hpil_sm_21_state_08	equ	08h
+hpil_sm_ah_state	equ	21h
+hpil_sm_ah_state_aids	equ	01h
+hpil_sm_ah_state_02	equ	02h
+hpil_sm_ah_state_acrs	equ	04h
+hpil_sm_ah_state_08	equ	08h
 
 hpil_sm_d_state	equ	22h			; Driver
 hpil_sm_d_state_dids	equ	01h
-hpil_sm_d_state_02	equ	02h
-hpil_sm_d_state_04	equ	04h
-hpil_sm_d_state_08	equ	08h
+hpil_sm_d_state_dtrs	equ	02h
+hpil_sm_d_state_dacs	equ	04h
+hpil_sm_d_state_dscs	equ	08h
 
 hpil_sm_dc_state	equ	23h		; Device Clear
 hpil_sm_dc_state_dcis	equ	01h
@@ -340,7 +340,7 @@ main_loop:
 	assume	mb:1
 	call	hpil_read_intr_reg
 	call	hpil_sm_r	; state machine 20h
-	call	hpil_sm_21	; state machine 21h
+	call	hpil_sm_ah	; state machine 21h
 	call	hpil_sm_d	; Driver
 	call	hpil_sm_dc	; Device Clear
 				; no state machine 24h
@@ -2211,16 +2211,21 @@ hpil_sm_r_rsys:
 
 	call	X0ee1
 	jnz	hpil_sm_r_goto_goto_04
+
 	call	hpil_check_msg_non_data_and_frns
 	jz	X0858
-	mov	r0,#27h
+
+	mov	r0,#hpil_sm_l_state
 	mov	a,@r0
-	anl	a,#2
+	anl	a,#hpil_sm_l_state_lacs
 	jnz	hpil_sm_r_goto_goto_04
+
 X0858:	call	hpil_check_msg_non_data_and_frav
 	jz	X0860
+
 	call	hpil_check_sot
 	jz	hpil_sm_r_goto_goto_04
+
 X0860:	call	hpil_check_sot
 	jz	X086b
 
@@ -2260,7 +2265,7 @@ hpil_sm_r_04:
 	jnz	X0829
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
-	anl	a,#hpil_sm_d_state_02
+	anl	a,#hpil_sm_d_state_dtrs
 	jnz	X089e
 
 	sel	rb0		; space available in receive buffer?
@@ -2272,12 +2277,12 @@ hpil_sm_r_04:
 X089e:	ret
 
 hpil_sm_r_goto_08:
-	mov	@r1,#hpil_sm_r_state_08
+	mov	@r1,#hpil_sm_r_state_rits
 
 hpil_sm_r_08:
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
-	anl	a,#hpil_sm_d_state_02
+	anl	a,#hpil_sm_d_state_dtrs
 	jnz	hpil_sm_r_goto_reis
 	ret
 
@@ -2346,59 +2351,62 @@ X08f0:	mov	r0,#46h
 
 	org	900h
 
-hpil_sm_21:
-	mov	r1,#hpil_sm_21_state
+hpil_sm_ah:
+	mov	r1,#hpil_sm_ah_state
 	mov	a,@r1
-	jb0	hpil_sm_21_01
-	jb1	hpil_sm_21_02
-	jb2	hpil_sm_21_04
-	jb3	hpil_sm_21_08
+	jb0	hpil_sm_ah_aids
+	jb1	hpil_sm_ah_02
+	jb2	hpil_sm_ah_04
+	jb3	hpil_sm_ah_08
 
-hpil_sm_21_goto_01:
-	mov	@r1,#hpil_sm_21_state_01
+hpil_sm_ah_goto_aids:
+	mov	@r1,#hpil_sm_ah_state_aids
 
-hpil_sm_21_01:
-	mov	r0,#hpil_sm_t_state
-	mov	a,@r0
-	anl	a,#0fch
-	jnz	hpil_sm_21_goto_02
-
-	ret
-
-hpil_sm_21_goto_02:
-	mov	@r1,#hpil_sm_21_state_02
-
-hpil_sm_21_02:
-	mov	r0,#hpil_sm_t_state
+hpil_sm_ah_aids:
+	mov	r0,#hpil_sm_t_state	; T other than TIDS or TADS?
 	mov	a,@r0
 	anl	a,#0ffh & ~(hpil_sm_t_state_tids | hpil_sm_t_state_tads)
-	jz	hpil_sm_21_goto_01
-	call	X0fd7
-	jz	X0929
-	mov	r0,#hpil_sm_d_state
-	mov	a,@r0
-	anl	a,#hpil_sm_d_state_04
-	jz	hpil_sm_21_goto_04
-X0929:	ret
+	jnz	hpil_sm_ah_goto_02	;  yes
 
-hpil_sm_21_goto_04:
-	mov	@r1,#hpil_sm_21_state_04
-
-hpil_sm_21_04:
-	mov	r0,#hpil_sm_d_state
-	mov	a,@r0
-	anl	a,#hpil_sm_d_state_04
-	jnz	hpil_sm_21_goto_08
 	ret
 
-hpil_sm_21_goto_08:
-	mov	@r1,#hpil_sm_21_state_08
+hpil_sm_ah_goto_02:
+	mov	@r1,#hpil_sm_ah_state_02
 
-hpil_sm_21_08:
+hpil_sm_ah_02:
+	mov	r0,#hpil_sm_t_state	; T other than TIDS or TADS?
+	mov	a,@r0
+	anl	a,#0ffh & ~(hpil_sm_t_state_tids | hpil_sm_t_state_tads)
+	jz	hpil_sm_ah_goto_aids	; no
+
+	call	X0fd7
+	jz	X0929
+
+	mov	r0,#hpil_sm_d_state
+	mov	a,@r0
+	anl	a,#hpil_sm_d_state_dacs
+	jz	hpil_sm_ah_goto_04
+
+X0929:	ret
+
+hpil_sm_ah_goto_04:
+	mov	@r1,#hpil_sm_ah_state_acrs
+
+hpil_sm_ah_04:
+	mov	r0,#hpil_sm_d_state
+	mov	a,@r0
+	anl	a,#hpil_sm_d_state_dacs
+	jnz	hpil_sm_ah_goto_08
+	ret
+
+hpil_sm_ah_goto_08:
+	mov	@r1,#hpil_sm_ah_state_08
+
+hpil_sm_ah_08:
 	mov	r0,#hpil_sm_t_state
 	mov	a,@r0
 	anl	a,#0fch
-	jz	hpil_sm_21_goto_01
+	jz	hpil_sm_ah_goto_aids
 
 	call	X0fd7
 	jnz	X0956
@@ -2410,17 +2418,17 @@ hpil_sm_21_08:
 	mov	r0,#hpil_sm_r_state
 	mov	a,@r0
 	anl	a,#hpil_sm_r_state_reis
-	jnz	hpil_sm_21_goto_02
+	jnz	hpil_sm_ah_goto_02
 	call	hpil_check_msg_non_data
 	jz	X0956
 	mov	a,r7
 	anl	a,#2
-	jnz	hpil_sm_21_goto_02
+	jnz	hpil_sm_ah_goto_02
 X0956:	ret
 
 
 ; HP-IL D (Driver) state machine
-; For HP-IL chip (1LB3), use state machine specification in HP-IL
+; For HP-IL chip (1LB3), should use state machine specification in HP-IL
 ; Integrated Circuit User's Manual, figure 3-3, rather than that of
 ; HP-IL Interface Specification, figure 2-4.
 
@@ -2428,44 +2436,45 @@ hpil_sm_d:
 	mov	r1,#hpil_sm_d_state
 	mov	a,@r1
 	jb0	hpil_sm_d_dids
-	jb1	x_hpil_sm_d_02
-	jb2	hpil_sm_d_04
-	jb3	hpil_sm_d_08
+	jb1	x_hpil_sm_d_dtrs
+	jb2	hpil_sm_d_dacs
+	jb3	hpil_sm_d_dscs
 
 hpil_sm_d_goto_dids:
 	mov	@r1,#1
 
 hpil_sm_d_dids:
 	mov	a,r7
-	anl	a,#1				; ORAV? possible proxy for SDYS+SCHS?
-	jz	hpil_sm_d_goto_08
+	anl	a,#1				; ORAV - possible proxy for SDYS+SCHS?
+	jz	hpil_sm_d_goto_dscs
 
-	mov	r0,#hpil_sm_r_state		; test ACRS? RITS?
+	mov	r0,#hpil_sm_r_state
 	mov	a,@r0
-	anl	a,#hpil_sm_r_state_08
-	jnz	hpil_sm_d_goto_02
+	anl	a,#hpil_sm_r_state_rits
+	jnz	hpil_sm_d_goto_dtrs
 
-	mov	r0,#hpil_sm_21_state		; test ACRS? RITS?
+	mov	r0,#hpil_sm_ah_state
 	mov	a,@r0
-	anl	a,#hpil_sm_21_state_04
-	jnz	X0982
+	anl	a,#hpil_sm_ah_state_acrs
+	jnz	hpil_sm_d_goto_dacs
 	ret
 
 ; retransmit a frame
-hpil_sm_d_goto_02:
+hpil_sm_d_goto_dtrs:
 	mov	r0,#2		; write A to HP-IL data reg, transmitting a
 	mov	a,r2		;   frame with the received control bits
 	call	hpil_write_reg
-	mov	@r1,#2
+	mov	@r1,#hpil_sm_d_state_dtrs
 	ret
 
-x_hpil_sm_d_02:
-	jmp	hpil_sm_d_02_04_08
+x_hpil_sm_d_dtrs:
+	jmp	hpil_sm_d_dtrs_dacs_dscs
 
 
 ; transmit a frame - write R1 into HP-IL interrupt register (incl. frame control bits),
 ;                    write data bits from R2 into HP-IL data register
-X0982:	mov	r0,#1		; HP-IL interrupt register
+hpil_sm_d_goto_dacs:
+	mov	r0,#1		; HP-IL interrupt register
 	sel	rb0
 	mov	a,r1
 	sel	rb1
@@ -2477,21 +2486,21 @@ X0982:	mov	r0,#1		; HP-IL interrupt register
 	sel	rb1
 	call	hpil_write_reg
 
-	mov	@r1,#4		; next time we write the HP-IL interrupt register, enable FRAV int only
+	mov	@r1,#hpil_sm_d_state_dacs
 	ret
 
 
-hpil_sm_d_04:
-	jmp	hpil_sm_d_02_04_08
+hpil_sm_d_dacs:
+	jmp	hpil_sm_d_dtrs_dacs_dscs
 
-hpil_sm_d_goto_08:
-	mov	@r1,#8
+hpil_sm_d_goto_dscs:
+	mov	@r1,#hpil_sm_d_state_dscs
 
 
-hpil_sm_d_08:
-	jmp	hpil_sm_d_02_04_08
+hpil_sm_d_dscs:
+	jmp	hpil_sm_d_dtrs_dacs_dscs
 
-hpil_sm_d_02_04_08:
+hpil_sm_d_dtrs_dacs_dscs:
 	mov	a,r7		; poll ORAV waiting for transmission to complete
 	anl	a,#1
 	jnz	hpil_sm_d_goto_dids
@@ -2674,10 +2683,12 @@ hpil_sm_aa_asis:
 	anl	a,#0e0h		; mask off address bits from ready message
 	xrl	a,#hpil_rdy_aes	; looking for NES
 	jnz	X0a78
+
 	mov	r0,#hpil_sm_d_state
 	mov	a,@r0
-	anl	a,#hpil_sm_d_state_02
+	anl	a,#hpil_sm_d_state_dtrs
 	jnz	X0a79
+
 X0a78:	ret
 
 X0a79:	sel	rb0
@@ -3602,10 +3613,10 @@ X0ed8:	mov	r0,#hpil_sm_l_state
 X0ee1:	call	hpil_check_msg_non_data_and_frav
 	jz	X0eef
 	mov	a,r2
-	xrl	a,#64h
+	xrl	a,#hpil_rdy_tct
 	jz	X0efc
 	mov	a,r2
-	xrl	a,#60h
+	xrl	a,#hpil_rdy_sda
 	jz	X0efc
 X0eef:	call	hpil_check_msg_non_data_and_frns
 	jz	X0efb
@@ -3620,6 +3631,7 @@ X0efb:	ret
 
 X0efc:	inc	a
 	ret
+
 
 	org	0f00h
 
@@ -3689,9 +3701,9 @@ hpil_sm_2b_01:
 	mov	a,@r0
 	anl	a,#2
 	jz	X0f81
-	mov	r0,#hpil_sm_21_state
+	mov	r0,#hpil_sm_ah_state
 	mov	a,@r0
-	anl	a,#hpil_sm_21_state_02
+	anl	a,#hpil_sm_ah_state_02
 	jz	X0f81
 	mov	r0,#hpil_sm_r_state
 	mov	a,@r0
@@ -3754,9 +3766,9 @@ hpil_sm_2b_goto_08:
 hpil_sm_2b_08:
 	jmp	X0fa4
 
-X0fa4:	mov	r0,#hpil_sm_21_state
+X0fa4:	mov	r0,#hpil_sm_ah_state
 	mov	a,@r0
-	anl	a,#hpil_sm_21_state_08
+	anl	a,#hpil_sm_ah_state_08
 	jnz	hpil_sm_2b_goto_01
 	ret
 
