@@ -2,7 +2,7 @@
 ; Mountain Computer MC00701A / HP 92198A
 
 ; Copyright 2024 Eric Smith <spacewar@gmail.com>
-; The original code had no US copyright
+; The original code had no US copyright.
 
 ; The microprocessor is an 8039.
 ; The firmware is stored in U2, a 2732 EPROM or equivalent
@@ -16,9 +16,14 @@
 accessory_id	equ	032h
 status_byte_1	equ	080h
 
-; The CRTC is a 6545A, though it appears that the special feaures of the
-; 6545 (compared to similar CRTC chips) are not being used, so an MC68A45
-; or HD46505 might work.
+; The CRTC is a 6545A, though it appears that the only utilized special
+; feaures of the 6545 or 6545A, as compared to the 6845, are:
+;   * ability to configure the vertical sync pulse width from 1 to 16
+;     scan lines, versus a fixed 16 scan lines in the MC6845
+;   * display enable skew by one character time
+;   * cursor skew by one character time
+; The MC6845A also has these capabilities, but the skews are controlled
+; by different bits in the mode register than in the 6545.
 
 ; I/O port bits:
 ;   P10       show display (0 = blank)
@@ -68,13 +73,13 @@ status_byte_1	equ	080h
 ;
 ;   RB1 r0 (018h)  general indirection use
 ;       r1 (019h)  general indirection use - in HP-IL state machines, points
-;                                            to the state variable
-;       r2 (01ah)  HP-IL DOE remote message data bits (character being processed)
+;                                            to the current state variable
+;       r2 (01ah)  HP-IL remote message data bits (character being processed)
 ;       r3 (01bh)
 ;       r4 (01ch)
 ;       r5 (01dh)
 ;       r6 (01eh)
-;       r7 (01fh)  HP-IL remote message C bits and chips status flags
+;       r7 (01fh)  HP-IL remote message C bits and status flags (interrupt register)
 ;
 ; indirectly accessible variables:
 ;
@@ -365,7 +370,7 @@ main_loop:
 	call	enqueue_rx_data
 	sel	mb1
 	assume	mb:1
-	call	X0fac
+	call	check_receive_buffer_full
 	call	X0e14
 	sel	mb0
 	assume	mb:0
@@ -582,12 +587,12 @@ X010d:	sel	rb0		; are we in an escape sequence?
 	mov	a,r5
 	sel	rb1
 	cpl	a
-	jb4	X011f		; replace mode
-	jmp	X0536		; insert mode
+	jb4	rx_char_replace
+	jmp	rx_char_insert
 
 
 ; enqueue received character
-X011f:	mov	a,r2
+rx_char_replace:	mov	a,r2
 	jz	X0132
 	mov	r0,#rx_wr_ptr
 
@@ -629,13 +634,13 @@ control_char:
 	sel	rb1
 
 	call	check_monitor_mode
-	jnz	X011f
+	jnz	rx_char_replace
 	ret
 
 
 ; not ESC
 X014b:	call	check_monitor_mode
-	jnz	X011f
+	jnz	rx_char_replace
 	call	X0226
 	mov	a,r2
 	xrl	a,#char_cr
@@ -677,10 +682,10 @@ X016e:	call	check_monitor_mode		; in monitor mode?
 
 	mov	a,r2		; was the ESC followed by Z?
 	xrl	a,#'Z'
-	jnz	X011f		;  no, treat as a normal character
+	jnz	rx_char_replace		;  no, treat as a normal character
 
 	call	esc_clear_monitor_mode	; yes, clear monitor mode
-	jmp	X011f
+	jmp	rx_char_replace
 
 
 ; in escape sequence, not in monitor mode
@@ -1568,7 +1573,8 @@ X0535:	ret
 
 
 ; insert character
-X0536:	dis	i
+rx_char_insert:
+	dis	i
 	call	X069c
 	mov	a,r2
 	mov	r6,a
@@ -1696,6 +1702,7 @@ X05d7:	inc	r5
 	mov	a,@r0
 	mov	r7,a
 	jmp	X054a
+
 
 X05e2:	mov	a,r4
 	orl	a,#0b0h			; select display RAM, A11..A8 from low nibble of R4
@@ -1832,6 +1839,7 @@ X0666:	mov	a,@r0
 
 X069a:	jmp	X0722
 
+
 X069c:	mov	r0,#40h
 	mov	a,r6
 	mov	@r0,a
@@ -1839,6 +1847,7 @@ X069c:	mov	r0,#40h
 	mov	a,r7
 	mov	@r0,a
 	ret
+
 
 X06a4:	mov	r0,#40h
 	mov	a,@r0
@@ -3785,7 +3794,8 @@ X0fa4:	mov	r0,#hpil_sm_ah_state
 	ret
 
 
-X0fac:	call	hpil_check_msg_non_data
+check_receive_buffer_full:
+	call	hpil_check_msg_non_data
 	jz	X0fb7
 	sel	rb0
 	mov	a,r5
